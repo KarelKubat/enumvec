@@ -122,3 +122,38 @@ func TestEnumVec_Size(t *testing.T) {
 		t.Errorf("Expected size 16 after setting index 64, got %d", s)
 	}
 }
+
+func TestEnumVec_NewWithCapacity(t *testing.T) {
+	// max=15 (4 bits per val, 16 values per word). Size=32 values should allocate 2 words (16 bytes).
+	ev := NewWithCapacity(15, 32)
+	if s := ev.Size(); s != 16 {
+		t.Errorf("Expected pre-allocated size 16, got %d", s)
+	}
+
+	// Should not reallocate or resize if setting within capacity
+	if err := ev.Set(5, 31); err != nil {
+		t.Fatalf("Set failed: %v", err)
+	}
+	if s := ev.Size(); s != 16 {
+		t.Errorf("Expected size to remain 16, got %d", s)
+	}
+	if v := ev.Get(31); v != 5 {
+		t.Errorf("Expected 5, got %d", v)
+	}
+}
+
+func TestEnumVec_MaxZero(t *testing.T) {
+	ev := New(0)
+	if err := ev.Set(0, 100000); err != nil {
+		t.Fatalf("Set(0, 100000) failed: %v", err)
+	}
+	if s := ev.Size(); s != 0 {
+		t.Errorf("Expected size 0 for max=0 vector, got %d", s)
+	}
+	if v := ev.Get(100000); v != 0 {
+		t.Errorf("Expected 0, got %d", v)
+	}
+	if err := ev.Set(1, 100000); err == nil {
+		t.Error("Expected error setting non-zero value on max=0 vector, got nil")
+	}
+}

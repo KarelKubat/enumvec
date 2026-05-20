@@ -8,24 +8,36 @@ import (
 
 // EnumVec stores small integer values packed into a uint64 slice.
 type EnumVec struct {
-	vec         []uint64
-	max         uint64
-	bitsPerVal  int
-	valsPerWord int
-	mask        uint64
+	vec              []uint64
+	max              uint64
+	bitsPerVal       int
+	valsPerWord      int
+	mask             uint64
+	isPowerOfTwo     bool
+	valsPerWordShift uint
+	valsPerWordMask  uint64
 }
 
 // New initializes and returns a *EnumVec.
 // max defines the maximum value that can be stored (0 to max).
 func New(max uint64) *EnumVec {
+	return NewWithCapacity(max, 0)
+}
+
+// NewWithCapacity initializes and returns an *EnumVec with pre-allocated storage for initialSize values.
+// max defines the maximum value that can be stored (0 to max).
+func NewWithCapacity(max uint64, initialSize uint64) *EnumVec {
 	if max == 0 {
 		// Even if max is 0, we need at least 1 bit to represent the value 0.
 		// If max is 0, we only store 0, which takes 1 bit (or technically 0, but 1 is safer for logic).
 		return &EnumVec{
-			max:         0,
-			bitsPerVal:  1,
-			valsPerWord: 64,
-			mask:        0,
+			max:              0,
+			bitsPerVal:       1,
+			valsPerWord:      64,
+			mask:             0,
+			isPowerOfTwo:     true,
+			valsPerWordShift: 6,
+			valsPerWordMask:  63,
 		}
 	}
 
@@ -44,11 +56,29 @@ func New(max uint64) *EnumVec {
 		mask = ^uint64(0)
 	}
 
+	isPowerOfTwo := (valsPerWord & (valsPerWord - 1)) == 0
+	var shift uint
+	var vpwMask uint64
+	if isPowerOfTwo {
+		shift = uint(bits.TrailingZeros64(uint64(valsPerWord)))
+		vpwMask = uint64(valsPerWord - 1)
+	}
+
+	var vec []uint64
+	if initialSize > 0 {
+		wordCount := (initialSize + uint64(valsPerWord) - 1) / uint64(valsPerWord)
+		vec = make([]uint64, wordCount)
+	}
+
 	return &EnumVec{
-		max:         max,
-		bitsPerVal:  bpv,
-		valsPerWord: valsPerWord,
-		mask:        mask,
+		vec:              vec,
+		max:              max,
+		bitsPerVal:       bpv,
+		valsPerWord:      valsPerWord,
+		mask:             mask,
+		isPowerOfTwo:     isPowerOfTwo,
+		valsPerWordShift: shift,
+		valsPerWordMask:  vpwMask,
 	}
 }
 
@@ -59,15 +89,35 @@ func (ev *EnumVec) Set(value uint64, index uint64) error {
 	if value > ev.max {
 		return fmt.Errorf("value %d exceeds max %d", value, ev.max)
 	}
+	if ev.max == 0 {
+		// When max is 0, any valid value is 0. 0 is default and takes no memory, so short-circuit.
+		return nil
+	}
 
-	wordIdx := int(index / uint64(ev.valsPerWord))
-	valOffset := uint(index%uint64(ev.valsPerWord)) * uint(ev.bitsPerVal)
+	var wordIdx int
+	var valOffset uint
+	if ev.isPowerOfTwo {
+		wordIdx = int(index >> ev.valsPerWordShift)
+		valOffset = uint(index & ev.valsPerWordMask) * uint(ev.bitsPerVal)
+	} else {
+		wordIdx = int(index / uint64(ev.valsPerWord))
+		valOffset = uint(index % uint64(ev.valsPerWord)) * uint(ev.bitsPerVal)
+	}
 
 	// Ensure slice is large enough
 	if wordIdx >= len(ev.vec) {
-		newVec := make([]uint64, wordIdx+1)
-		copy(newVec, ev.vec)
-		ev.vec = newVec
+		newLen := wordIdx + 1
+		if newLen <= cap(ev.vec) {
+			ev.vec = ev.vec[:newLen]
+		} else {
+			newCap := cap(ev.vec) * 2
+			if newCap < newLen {
+				newCap = newLen
+			}
+			newVec := make([]uint64, newLen, newCap)
+			copy(newVec, ev.vec)
+			ev.vec = newVec
+		}
 	}
 
 	// Clear the existing bits at that position
@@ -81,12 +131,24 @@ func (ev *EnumVec) Set(value uint64, index uint64) error {
 // Get returns the value stored at the given index.
 // If index is out of bounds, it returns 0 (default value).
 func (ev *EnumVec) Get(index uint64) uint64 {
-	wordIdx := int(index / uint64(ev.valsPerWord))
+	if ev.max == 0 {
+		return 0
+	}
+
+	var wordIdx int
+	var valOffset uint
+	if ev.isPowerOfTwo {
+		wordIdx = int(index >> ev.valsPerWordShift)
+		valOffset = uint(index & ev.valsPerWordMask) * uint(ev.bitsPerVal)
+	} else {
+		wordIdx = int(index / uint64(ev.valsPerWord))
+		valOffset = uint(index % uint64(ev.valsPerWord)) * uint(ev.bitsPerVal)
+	}
+
 	if wordIdx >= len(ev.vec) {
 		return 0
 	}
 
-	valOffset := uint(index%uint64(ev.valsPerWord)) * uint(ev.bitsPerVal)
 	return (ev.vec[wordIdx] >> valOffset) & ev.mask
 }
 
@@ -94,4 +156,3 @@ func (ev *EnumVec) Get(index uint64) uint64 {
 func (ev *EnumVec) Size() uint64 {
 	return uint64(len(ev.vec)) * 8
 }
-
