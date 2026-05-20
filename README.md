@@ -20,9 +20,14 @@ store[1] = Second;
 // ... and so on
 ```
 
-But you only need 2 bits to store each value! Per element, the above array `store` won't leaves 6 out of each 8 bits unused. 
+But you only need 2 bits to store each value! Per element, the above array `store` won't use 6 out of each 8 bits. That's a waste of 75%.
 
 Or you can do this:
+
+- Create an enumvec-based store: `store := enumvec.New(Third)`. The argument says what the max of each value can be.
+- Store values: `store.Set(Second, 500000)` which stores at index 500000. Never mind the required storage to reach that half million index, it's automatically adjusted.
+- Similarly, you can `store.Get(500000)` to retrieve a value.
+- If you are interested how many bytes are actually used in the storage, ask `store.Size()`.
 
 ```go
 package main
