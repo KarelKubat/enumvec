@@ -65,3 +65,4 @@ func main() {
 
 - `enumvec` relies on bit operations (masking, shifting) to set and get values. This is inherently slower than plain indexing. As written above, `enumvec` is optimized to be memory-saving.
 - All `enumvec`'s types are `uint64`: values, indexes, sizes. Typecast to whichever type you wish accordingly.
+- You have to know in advance the maximum value to store. If you create a storage for say up to 6 as in `enumvec.New(6)`, then you can store anything from 0 to 6 inclusive. Trying to store value 7 won't work, but it will return an error.
